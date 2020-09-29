@@ -1,4 +1,4 @@
-# ArduinoRadius
+# Arduino Radius Library
 
 Adapted from "RADIUS Library for Arduino" 
 http://www.airspayce.com/mikem/arduino/Radius/
