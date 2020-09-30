@@ -5,15 +5,15 @@
 // Author: Mike McCauley (mikem@airspayce.com)
 // $Id: RadiusMsg.cpp,v 1.1 2009/10/13 05:07:28 mikem Exp mikem $
 
-#include "Ethernet.h"
+#include <Ethernet.h>
 #include "RadiusMsg.h"
 //#include <string.h>
 
 extern "C" 
 {
 #include "md5.h"
-#include "utility/socket.h"
-#include "utility/w5100.h"
+//#include "utility/socket.h"
+//#include "utility/w5100.h"
 }
 
 uint16_t htons(uint16_t v)
@@ -136,7 +136,7 @@ RadiusMsg::getAttr(unsigned type, unsigned vendor, uint32_t* value, uint8_t skip
 }
 
 void  
-RadiusMsg::encryptPassword(uint8_t* data, uint8_t length, uint8_t* secret, uint8_t secretLength, uint8_t* iv)
+RadiusMsg::encryptPassword(uint8_t* data, uint8_t length, const char* secret, uint8_t secretLength, uint8_t* iv)
 {
   uint8_t  i;
   uint8_t lastround[RADIUS_PASSWORD_BLOCK_SIZE];
@@ -146,7 +146,7 @@ RadiusMsg::encryptPassword(uint8_t* data, uint8_t length, uint8_t* secret, uint8
   {
     md5_ctx  context;
     md5_init(&context);
-    md5_update(&context, secret, secretLength);
+    md5_update(&context, (uint8_t*)secret, secretLength);
     md5_update(&context, lastround, RADIUS_PASSWORD_BLOCK_SIZE);
     uint8_t digest[RADIUS_PASSWORD_BLOCK_SIZE];
     md5_final(digest, &context);
@@ -160,7 +160,7 @@ RadiusMsg::encryptPassword(uint8_t* data, uint8_t length, uint8_t* secret, uint8
 }
 
 void 
-RadiusMsg::sign(uint8_t* secret, uint8_t secretLength, RadiusMsg* original)
+RadiusMsg::sign(const char* secret, uint8_t secretLength, RadiusMsg* original)
 {
   // Set the authenticator
   uint8_t i;
@@ -206,7 +206,7 @@ RadiusMsg::sign(uint8_t* secret, uint8_t secretLength, RadiusMsg* original)
     md5_ctx context;
     md5_init(&context);
     md5_update(&context, (uint8_t*)&packet, packetLength);
-    md5_update(&context, secret, secretLength);
+    md5_update(&context, (uint8_t*)secret, secretLength);
     RadiusAuthenticator digest;
     md5_final(digest, &context);
     memcpy(packet.authenticator, digest, RADIUS_AUTHENTICATOR_LENGTH);
@@ -215,52 +215,49 @@ RadiusMsg::sign(uint8_t* secret, uint8_t secretLength, RadiusMsg* original)
 
 
 uint16_t
-RadiusMsg::sendto(UDPSocket* socket, IP4Address peer, uint16_t port)
+RadiusMsg::sendto(EthernetUDP* Udp, IPAddress server, uint16_t port)
 {
-  uint8_t i;
-  for (i = 0; i < 4; i++)
-    peerAddress[i] = peer[i];
-  peerPort = port;
-  packet.length = htons(packetLength);
-  return socket->sendto((const uint8_t*)&packet, packetLength, peer, 1645);
+  //uint8_t i;
+  //for (i = 0; i < 4; i++)
+  //  peerAddress[i] = server[i];
+  //peerPort = port;
+  packet.length = htons(packetLength); 
+  Udp->beginPacket(server, port);
+  Udp->write((const char*)&packet,packetLength);
+  return Udp->endPacket();
 }
 
 uint16_t
-RadiusMsg::recv(UDPSocket* socket)
+RadiusMsg::recv(EthernetUDP* Udp, RadiusMsg* reply)
 {
   packetLength = 0;
-  uint16_t ret = socket->recvfrom((uint8*)&packet, 255, peerAddress, &peerPort);
+  uint16_t ret = Udp->read((uint8*)&reply->packet, 255); //socket->recvfrom((uint8*)&packet, 255, peerAddress, &peerPort);
   if (ret < RADIUS_HEADER_LENGTH || ret > RADIUS_MAX_SIZE)
     return 0; // Discard
-  uint16_t l = ntohs(packet.length);
-  if (l > ret)
-    return 0; // Discard
+  reply->peerAddress        = Udp->remoteIP();
+  reply->peerPort           = Udp->remotePort();
   packetLength = ret; 
   return ret;
 }
 
 uint8_t
-RadiusMsg::sendWaitReply(UDPSocket* socket, IP4Address server, uint16_t port, RadiusMsg* reply)
+RadiusMsg::sendWaitReply(EthernetUDP* Udp, IPAddress server, uint16_t port, RadiusMsg* reply)
 {
   while (retries-- > 0)
   {
-    uint16_t ret = sendto(socket, server, port);
+    uint16_t ret = sendto(Udp, server, port);
     unsigned long sendTime = millis();
     if (ret <= 0)
       return false;  // Send failed
     // wait for the timeout
     while (millis() < sendTime + 1000 * timeout)
     {
-      if (socket->available())
+      if (Udp->parsePacket())
       {
-        ret = reply->recv(socket);
-
+        ret = reply->recv(Udp, reply);
         if (ret > 0 && reply->packet.identifier == packet.identifier 
-            && reply->peerAddress[0] == peerAddress[0]
-            && reply->peerAddress[1] == peerAddress[1]
-            && reply->peerAddress[2] == peerAddress[2]
-            && reply->peerAddress[3] == peerAddress[3]
-            && reply->peerPort == peerPort)  
+            && reply->peerAddress == server
+            && reply->peerPort == port)  
          {
             // This is the reply we are waiting for
             return true; 
@@ -272,7 +269,7 @@ RadiusMsg::sendWaitReply(UDPSocket* socket, IP4Address server, uint16_t port, Ra
 }
 
 uint8_t
-RadiusMsg::checkAuthenticatorsWithOriginal(uint8_t* secret, uint8_t secretLength, RadiusMsg* original)
+RadiusMsg::checkAuthenticatorsWithOriginal(const char* secret, uint8_t secretLength, RadiusMsg* original)
 {
   RadiusAuthenticator  savedAuthenticator;
   memcpy(savedAuthenticator, packet.authenticator, RADIUS_AUTHENTICATOR_LENGTH);
@@ -301,7 +298,7 @@ RadiusMsg::checkAuthenticatorsWithOriginal(uint8_t* secret, uint8_t secretLength
   md5_ctx context;
   md5_init(&context);
   md5_update(&context, (uint8_t*)&packet, packetLength);
-  md5_update(&context, secret, secretLength);
+  md5_update(&context, (uint8_t*)secret, secretLength);
   RadiusAuthenticator  digest;
   md5_final(digest, &context);
   // Restore the saved authenticator

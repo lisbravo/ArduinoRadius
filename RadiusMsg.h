@@ -50,7 +50,8 @@
 #ifndef _RADIUSMSG_H_
 #define _RADIUSMSG_H_
 
-#include "UDPSocket.h"
+//#include "UDPSocket.h"
+#include <EthernetUdp.h>
 
 #define RADIUS_AUTHENTICATOR_LENGTH 16
 #define RADIUS_PASSWORD_BLOCK_SIZE 16
@@ -314,11 +315,11 @@ private:
     uint8_t      timeout;
 
     /// The IP address of the peer destination address (when sent) or the sender address when received
-    IP4Address   peerAddress;
+    IPAddress   peerAddress;
 
     /// The port number of the peer
     uint16_t     peerPort;
-
+    
 public:
     /// Constructor for receiving
     RadiusMsg();
@@ -379,14 +380,14 @@ public:
     /// \param[in] secretLength Length of the secret in octets
     /// \param[in] original for RADIUS requests that are replies to an earlier request, this 
     /// points to the original requerst, which is required to correctly set the authenticator in the reply.
-    void     sign(uint8_t* secret, uint8_t secretLength, RadiusMsg* original = 0);
+    void     sign(const char* secret, uint8_t secretLength, RadiusMsg* original = 0);
 
     /// Sends this RADIUS message on a UDP Socket
     /// \param[in] socket Instance of UDPSocket to use to send the message
     /// \param[in] peer IPV4Address of the destination RADIUS peer
     /// \param[in] port Port number of the destination RADIUS peer
     /// \return Returns the sent packet size for success, else -1
-    uint16_t sendto(UDPSocket* socket, IP4Address peer, uint16_t port);
+    uint16_t sendto(EthernetUDP* Udp, IPAddress peer, uint16_t port);
 
     /// Utility function for encryption passwords and other data in RADIUS RFC compliant fashion
     /// \param[in] data The data octets to encrypt
@@ -394,25 +395,26 @@ public:
     /// \param[in] secret The RADIUS shared secret
     /// \param[in] secretLength Length of the secret in octets
     /// \param[in] iv The intialisation vector
-    void     encryptPassword(uint8_t* data, uint8_t length, uint8_t* secret, uint8_t secretLength, uint8_t* iv);
+    void     encryptPassword(uint8_t* data, uint8_t length, const char* secret, uint8_t secretLength, uint8_t* iv);
 
     /// Fill the packet data in the RadiusMsg with the next packet received on socket.
     /// Blocks until a packet is received. Packets that are received and which dont look
     /// vaguely like a RADIUS essage are discarded
     /// \param socket Pointer to the UDP socket to receive from
+    /// \param[in] reply Pointer to a RadiusMsg which will be filled in with the reply
     /// \return The number of octets in the received message else 0 if the message was discarded
-    uint16_t recv(UDPSocket* socket);
+    uint16_t recv(EthernetUDP* Udp, RadiusMsg* reply);
 
     /// Send a message to the destiantion server, and wait for a matching reply. 
     /// Implements timeouts and retries until a matching reply is received
     /// Non-matching RADIUS requests are silently discarded.
     /// Blocks until a satisfying reply is received or all retries are exhausted
     /// \param[in] socket Pointer to the UDP socket used to send and receive
-    /// \param[in] server IP4Address of the destination server
+    /// \param[in] server IPAddress of the destination server
     /// \param[in] port The port number of the RADIUS server at the destination
     /// \param[in] reply Pointer to a RadiusMsg which will be filled in with the reply (if any)
     /// \return true if the request was snetr and a matchin reply received
-    uint8_t  sendWaitReply(UDPSocket* socket, IP4Address server, uint16_t port, RadiusMsg* reply);
+    uint8_t  sendWaitReply(EthernetUDP* Udp, IPAddress server, uint16_t port, RadiusMsg* reply);
 
     /// Checks that the authenticator in the RadiusMsg is correct, and that therefore is 
     /// verified as being from the expected peer. For RADIUS replies, requires the 
@@ -422,7 +424,7 @@ public:
     /// \param[in] original When checking the authenticator of a RADIUS reply, this must point to the
     /// original request
     /// \return true if authenticator is correct.
-    uint8_t  checkAuthenticatorsWithOriginal(uint8_t* secret, uint8_t secretLength, RadiusMsg* original);
+    uint8_t  checkAuthenticatorsWithOriginal(const char* secret, uint8_t secretLength, RadiusMsg* original);
 };
 
 
